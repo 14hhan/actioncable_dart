@@ -13,7 +13,7 @@ typedef _OnChannelDisconnectedFunction = void Function();
 typedef _OnChannelMessageFunction = void Function(Map message);
 
 class ActionCable {
-  DateTime? _lastPing;
+  DateTime lastPing = DateTime.now();
   late Timer _timer;
   late IOWebSocketChannel _socketChannel;
   late StreamSubscription _listener;
@@ -32,14 +32,27 @@ class ActionCable {
     this.onConnectionLost,
     this.onCannotConnect,
   }) {
-    // rails gets a ping every 3 seconds
+    initWebSocketConnection(url);
+    // _timer = Timer.periodic(const Duration(seconds: 3), healthCheck);
+  }
+
+  initWebSocketConnection(String url,
+      {Map<String, String> headers: const {}}) async {
+    print("conecting...");
     _socketChannel = IOWebSocketChannel.connect(url,
         headers: headers, pingInterval: Duration(seconds: 3));
-    _listener = _socketChannel.stream.listen(_onData, onError: (_) {
-      this.disconnect(); // close a socket and the timer
-      if (this.onCannotConnect != null) this.onCannotConnect!();
+    print("socket connection initializied");
+    broadcastNotifications(url);
+  }
+
+  broadcastNotifications(String url, {Map<String, String> headers: const {}}) {
+    _listener = _socketChannel.stream.listen(_onData, onError: (e) {
+      print('Server error: $e');
+      initWebSocketConnection(url);
+    }, onDone: () {
+      print("conecting aborted");
+      initWebSocketConnection(url);
     });
-    _timer = Timer.periodic(const Duration(seconds: 3), healthCheck);
   }
 
   void disconnect() {
@@ -51,10 +64,7 @@ class ActionCable {
   // check if there is no ping for 3 seconds and signal a [onConnectionLost] if
   // there is no ping for more than 6 seconds
   void healthCheck(_) {
-    if (_lastPing == null) {
-      return;
-    }
-    if (DateTime.now().difference(_lastPing!) > Duration(seconds: 6)) {
+    if (DateTime.now().difference(lastPing!) > Duration(seconds: 6)) {
       this.disconnect();
       if (this.onConnectionLost != null) this.onConnectionLost!();
     }
@@ -115,7 +125,7 @@ class ActionCable {
     switch (payload['type']) {
       case 'ping':
         // rails sends epoch as seconds not miliseconds
-        _lastPing =
+        lastPing =
             DateTime.fromMillisecondsSinceEpoch(payload['message'] * 1000);
         break;
       case 'welcome':
@@ -155,5 +165,13 @@ class ActionCable {
 
   void _send(Map payload) {
     _socketChannel.sink.add(jsonEncode(payload));
+  }
+
+  DateTime? getLastPing() {
+    return lastPing;
+  }
+
+  void printLastPing() {
+    print(lastPing);
   }
 }
